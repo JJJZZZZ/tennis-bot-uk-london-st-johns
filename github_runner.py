@@ -124,18 +124,39 @@ class GitHubCourtMonitor:
                            f"Booked: {len(summary['booked_slots'])}, "
                            f"Sessions: {len(summary['session_slots'])}")
             
-            # Always send notification if courts are available
+            # Filter available slots to only include times after 6pm (18:00)
+            evening_slots = []
             if summary['available_slots']:
-                subject = f"🎾 {len(summary['available_slots'])} Tennis Courts Available at St Johns Park!"
-                body = self.format_availability_email(summary)
+                for slot in summary['available_slots']:
+                    slot_time = slot['time']
+                    # Extract hour from time format (e.g., '18:00' -> 18)
+                    try:
+                        hour = int(slot_time.split(':')[0])
+                        if hour >= 18:  # 6pm or later
+                            evening_slots.append(slot)
+                    except (ValueError, IndexError):
+                        # If time format is unexpected, skip this slot
+                        self.logger.warning(f"Unexpected time format: {slot_time}")
+                        continue
+            
+            # Only send notification if courts are available after 6pm
+            if evening_slots:
+                subject = f"🎾 {len(evening_slots)} Tennis Courts Available After 6pm at St Johns Park!"
+                # Update summary to only include evening slots for email
+                evening_summary = summary.copy()
+                evening_summary['available_slots'] = evening_slots
+                body = self.format_availability_email(evening_summary)
                 self.send_notification(subject, body)
                 
-                # Also log available slots
-                self.logger.info("AVAILABLE COURTS FOUND:")
-                for slot in summary['available_slots']:
+                # Also log available evening slots
+                self.logger.info("AVAILABLE EVENING COURTS FOUND (after 6pm):")
+                for slot in evening_slots:
                     self.logger.info(f"  {slot['date']} at {slot['time']} - {slot['court']}")
             else:
-                self.logger.info("No available courts found")
+                if summary['available_slots']:
+                    self.logger.info(f"Courts available but none after 6pm ({len(summary['available_slots'])} total slots)")
+                else:
+                    self.logger.info("No available courts found")
                 # Optionally send daily summary (uncomment if you want daily updates)
                 # if datetime.now().hour == 20:  # 8 PM UTC (9 PM UK time)
                 #     subject = "📊 Daily Tennis Court Summary - St Johns Park"
