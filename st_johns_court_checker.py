@@ -84,7 +84,7 @@ class StJohnsParkChecker:
             # Make request to booking page
             response = self.session.get(url)
             response.raise_for_status()
-            self.logger.info(f"Requesting URL: {url}")
+            self.logger.debug(f"Requesting URL: {url}")
             
             soup = BeautifulSoup(response.content, 'html.parser')
             
@@ -96,7 +96,7 @@ class StJohnsParkChecker:
             date_inputs = soup.find_all('input', {'type': 'date'})
             time_selects = soup.find_all('select', class_=lambda x: x and 'time' in x.lower())
             
-            self.logger.info(f"Found {len(date_inputs)} date inputs and {len(time_selects)} time selects")
+            self.logger.debug(f"Found {len(date_inputs)} date inputs and {len(time_selects)} time selects")
             
             # Check for AJAX endpoints in script tags
             scripts = soup.find_all('script')
@@ -104,9 +104,9 @@ class StJohnsParkChecker:
             for script in scripts:
                 if script.string and ('ajax' in script.string.lower() or 'api' in script.string.lower()):
                     ajax_count += 1
-                    self.logger.info("Found potential AJAX endpoint in script")
+                    self.logger.debug("Found potential AJAX endpoint in script")
             
-            self.logger.info(f"Found {ajax_count} scripts with AJAX/API content")
+            self.logger.debug(f"Found {ajax_count} scripts with AJAX/API content")
             
             # Check if venue is closed
             closed_element = soup.find('p', class_='closed')
@@ -159,15 +159,15 @@ class StJohnsParkChecker:
                     total_booked = sum(len(court['booked_times']) for court in court_data.values())
                     total_sessions = sum(len(court['session_times']) for court in court_data.values())
                     
-                    self.logger.info(f"Parsed table: {total_available} available, {total_booked} booked, {total_sessions} sessions")
+                    self.logger.debug(f"Parsed table: {total_available} available, {total_booked} booked, {total_sessions} sessions")
                 else:
-                    self.logger.info("No booking table found in availability div")
+                    self.logger.debug("No booking table found in availability div")
             else:
-                self.logger.info("No availability div found")
+                self.logger.debug("No availability div found")
             
             availability['status'] = 'open'
             
-            self.logger.info(f"Checked availability for {date}")
+            self.logger.debug(f"Checked availability for {date}")
             
         except requests.RequestException as e:
             self.logger.error(f"Request failed for date {date}: {e}")
@@ -189,7 +189,7 @@ class StJohnsParkChecker:
         dates = self.get_available_dates()
         
         for date in dates:
-            self.logger.info(f"Checking availability for {date}")
+            self.logger.debug(f"Checking availability for {date}")
             availability = self.check_court_availability(date)
             
             if not availability.get('error') and availability.get('status') != 'closed':
@@ -226,7 +226,7 @@ class StJohnsParkChecker:
         dates = self.get_available_dates()
         
         for date in dates:
-            self.logger.info(f"Getting summary for {date}")
+            self.logger.debug(f"Getting summary for {date}")
             availability = self.check_court_availability(date)
             
             if availability.get('error'):
@@ -256,6 +256,88 @@ class StJohnsParkChecker:
             time.sleep(1)  # Be respectful to server
             
         return summary
+    
+    def format_summary_report(self, summary: Dict) -> str:
+        """
+        Format the summary into a clean, readable report
+        
+        Args:
+            summary: Result from get_all_slots_summary()
+            
+        Returns:
+            Formatted string report
+        """
+        report = []
+        report.append("🎾 ST JOHNS PARK TENNIS COURT SUMMARY")
+        report.append("=" * 45)
+        
+        # Overall stats
+        total_available = len(summary['available_slots'])
+        total_booked = len(summary['booked_slots'])
+        total_sessions = len(summary['session_slots'])
+        total_closed = len(summary['closed_days'])
+        
+        report.append(f"📊 OVERVIEW:")
+        report.append(f"   Available: {total_available}")
+        report.append(f"   Booked: {total_booked}")
+        report.append(f"   Sessions: {total_sessions}")
+        report.append(f"   Closed Days: {total_closed}")
+        report.append("")
+        
+        # Available slots by date
+        if summary['available_slots']:
+            report.append("✅ AVAILABLE COURTS:")
+            
+            # Group by date
+            by_date = {}
+            for slot in summary['available_slots']:
+                date = slot['date']
+                if date not in by_date:
+                    by_date[date] = []
+                by_date[date].append(f"{slot['time']} ({slot['court']})")
+            
+            for date in sorted(by_date.keys()):
+                slots = by_date[date]
+                report.append(f"   {date}: {', '.join(slots)}")
+            report.append("")
+        else:
+            report.append("❌ NO AVAILABLE COURTS FOUND")
+            report.append("")
+        
+        # Evening availability (after 6pm)
+        evening_slots = []
+        for slot in summary['available_slots']:
+            try:
+                hour = int(slot['time'].split(':')[0])
+                if hour >= 18:
+                    evening_slots.append(slot)
+            except (ValueError, IndexError):
+                continue
+        
+        if evening_slots:
+            report.append("🌆 EVENING AVAILABILITY (6PM+):")
+            evening_by_date = {}
+            for slot in evening_slots:
+                date = slot['date']
+                if date not in evening_by_date:
+                    evening_by_date[date] = []
+                evening_by_date[date].append(f"{slot['time']} ({slot['court']})")
+            
+            for date in sorted(evening_by_date.keys()):
+                slots = evening_by_date[date]
+                report.append(f"   {date}: {', '.join(slots)}")
+            report.append("")
+        
+        # Closed days
+        if summary['closed_days']:
+            report.append("🚫 CLOSED DAYS:")
+            for closed in summary['closed_days']:
+                report.append(f"   {closed['date']}: {closed['message']}")
+            report.append("")
+        
+        report.append(f"🕐 Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+        
+        return "\n".join(report)
     
     def book_court(self, date: str, time: str, court: str) -> bool:
         """

@@ -119,10 +119,9 @@ class GitHubCourtMonitor:
             # Get comprehensive summary
             summary = self.checker.get_all_slots_summary()
             
-            # Log results
-            self.logger.info(f"Check completed - Available: {len(summary['available_slots'])}, "
-                           f"Booked: {len(summary['booked_slots'])}, "
-                           f"Sessions: {len(summary['session_slots'])}")
+            # Log clean summary report
+            summary_report = self.checker.format_summary_report(summary)
+            self.logger.info(f"Court check completed:\n{summary_report}")
             
             # Filter available slots to only include times after 6pm (18:00)
             evening_slots = []
@@ -148,10 +147,8 @@ class GitHubCourtMonitor:
                 body = self.format_availability_email(evening_summary)
                 self.send_notification(subject, body)
                 
-                # Also log available evening slots
-                self.logger.info("AVAILABLE EVENING COURTS FOUND (after 6pm):")
-                for slot in evening_slots:
-                    self.logger.info(f"  {slot['date']} at {slot['time']} - {slot['court']}")
+                # Evening slots already shown in summary report above
+                pass
             else:
                 if summary['available_slots']:
                     self.logger.info(f"Courts available but none after 6pm ({len(summary['available_slots'])} total slots)")
