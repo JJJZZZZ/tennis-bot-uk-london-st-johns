@@ -14,6 +14,14 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
       
+    - name: Restore notification state cache
+      uses: actions/cache@v4
+      with:
+        path: notified_slots.json
+        key: tennis-notifications-${{ hashFiles('**/github_runner.py') }}
+        restore-keys: |
+          tennis-notifications-
+      
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
@@ -32,6 +40,13 @@ jobs:
         EMAIL_USER: ${{ secrets.EMAIL_USER }}
         EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
         NOTIFICATION_EMAIL: ${{ secrets.NOTIFICATION_EMAIL }}
+        
+    - name: Save notification state cache
+      if: always()
+      uses: actions/cache/save@v4
+      with:
+        path: notified_slots.json
+        key: tennis-notifications-${{ hashFiles('**/github_runner.py') }}-${{ github.run_number }}
         
     - name: Upload logs
       if: always()
