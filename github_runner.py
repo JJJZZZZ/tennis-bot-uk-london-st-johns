@@ -119,10 +119,9 @@ class GitHubCourtMonitor:
             # Get comprehensive summary
             summary = self.checker.get_all_slots_summary()
             
-            # Log results
-            self.logger.info(f"Check completed - Available: {len(summary['available_slots'])}, "
-                           f"Booked: {len(summary['booked_slots'])}, "
-                           f"Sessions: {len(summary['session_slots'])}")
+            # Log clean summary report
+            summary_report = self.checker.format_summary_report(summary)
+            self.logger.info(f"Court check completed:\n{summary_report}")
             
             # Filter available slots to only include times after 5pm (17:00)
             evening_slots = []
