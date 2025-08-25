@@ -124,24 +124,37 @@ class GitHubCourtMonitor:
                            f"Booked: {len(summary['booked_slots'])}, "
                            f"Sessions: {len(summary['session_slots'])}")
             
-            # Filter available slots to only include times after 6pm (18:00)
+            # Filter available slots to only include times after 5pm (17:00)
             evening_slots = []
             if summary['available_slots']:
                 for slot in summary['available_slots']:
                     slot_time = slot['time']
-                    # Extract hour from time format (e.g., '18:00' -> 18)
+                    # Extract hour from time format (e.g., '18:00' or '8pm')
                     try:
-                        hour = int(slot_time.split(':')[0])
-                        if hour >= 18:  # 6pm or later
+                        if 'pm' in slot_time.lower():
+                            # Handle format like '8pm'
+                            hour = int(slot_time.lower().replace('pm', '').strip())
+                            if hour != 12:  # Convert pm to 24-hour (except 12pm stays 12)
+                                hour += 12
+                        elif 'am' in slot_time.lower():
+                            # Handle format like '8am'
+                            hour = int(slot_time.lower().replace('am', '').strip())
+                            if hour == 12:  # Convert 12am to 0
+                                hour = 0
+                        else:
+                            # Handle format like '18:00'
+                            hour = int(slot_time.split(':')[0])
+                        
+                        if hour >= 17:  # 5pm or later
                             evening_slots.append(slot)
                     except (ValueError, IndexError):
                         # If time format is unexpected, skip this slot
                         self.logger.warning(f"Unexpected time format: {slot_time}")
                         continue
             
-            # Only send notification if courts are available after 6pm
+            # Only send notification if courts are available after 5pm
             if evening_slots:
-                subject = f"🎾 {len(evening_slots)} Tennis Courts Available After 6pm at St Johns Park!"
+                subject = f"🎾 {len(evening_slots)} Tennis Courts Available After 5pm at St Johns Park!"
                 # Update summary to only include evening slots for email
                 evening_summary = summary.copy()
                 evening_summary['available_slots'] = evening_slots
@@ -149,12 +162,12 @@ class GitHubCourtMonitor:
                 self.send_notification(subject, body)
                 
                 # Also log available evening slots
-                self.logger.info("AVAILABLE EVENING COURTS FOUND (after 6pm):")
+                self.logger.info("AVAILABLE EVENING COURTS FOUND (after 5pm):")
                 for slot in evening_slots:
                     self.logger.info(f"  {slot['date']} at {slot['time']} - {slot['court']}")
             else:
                 if summary['available_slots']:
-                    self.logger.info(f"Courts available but none after 6pm ({len(summary['available_slots'])} total slots)")
+                    self.logger.info(f"Courts available but none after 5pm ({len(summary['available_slots'])} total slots)")
                 else:
                     self.logger.info("No available courts found")
                 # Optionally send daily summary (uncomment if you want daily updates)
