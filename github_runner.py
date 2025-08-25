@@ -5,6 +5,7 @@ Designed to run in GitHub Actions environment with email notifications
 """
 
 import os
+import json
 import smtplib
 import logging
 from datetime import datetime
@@ -15,6 +16,7 @@ from st_johns_court_checker import StJohnsParkChecker
 class GitHubCourtMonitor:
     def __init__(self):
         self.checker = StJohnsParkChecker()
+        self.state_file = 'notified_slots.json'
         
         # Email configuration from environment variables
         self.smtp_server = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
@@ -62,8 +64,27 @@ class GitHubCourtMonitor:
             self.logger.error(f"Failed to send notification: {e}")
             return False
     
-    def format_availability_email(self, summary):
-        """Format court availability as HTML email"""
+    def load_notified_slots(self):
+        """Load previously notified slots from file"""
+        try:
+            if os.path.exists(self.state_file):
+                with open(self.state_file, 'r') as f:
+                    return set(json.load(f))
+        except Exception as e:
+            self.logger.warning(f"Could not load notified slots: {e}")
+        return set()
+    
+    def save_notified_slots(self, slots):
+        """Save currently notified slots to file"""
+        try:
+            slot_ids = [f"{slot['date']}_{slot['time']}_{slot['court']}" for slot in slots]
+            with open(self.state_file, 'w') as f:
+                json.dump(slot_ids, f)
+        except Exception as e:
+            self.logger.error(f"Could not save notified slots: {e}")
+    
+    def format_availability_email(self, new_slots, all_evening_slots):
+        """Format court availability as HTML email with new and all available slots"""
         html = f"""
         <html>
         <head></head>
@@ -72,13 +93,24 @@ class GitHubCourtMonitor:
             <p><strong>Check Time:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}</p>
         """
         
-        if summary['available_slots']:
+        if new_slots:
             html += f"""
-            <h3>🎉 Available Courts Found!</h3>
+            <h3>🆕 New Courts Available After 5pm!</h3>
             <ul>
             """
-            for slot in summary['available_slots']:
+            for slot in new_slots:
                 html += f"<li><strong>{slot['date']}</strong> at <strong>{slot['time']}</strong> - {slot['court']}</li>"
+            html += "</ul>"
+        
+        if all_evening_slots:
+            html += f"""
+            <h3>🌅 All Available Courts After 5pm:</h3>
+            <ul>
+            """
+            for slot in all_evening_slots:
+                is_new = slot in new_slots
+                new_badge = " <span style='background-color: #ff4444; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;'>NEW</span>" if is_new else ""
+                html += f"<li><strong>{slot['date']}</strong> at <strong>{slot['time']}</strong> - {slot['court']}{new_badge}</li>"
             html += "</ul>"
             
             html += f"""
@@ -86,17 +118,12 @@ class GitHubCourtMonitor:
                style="background-color: #4CAF50; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">
                🔗 Book Now</a></p>
             """
-        else:
-            html += "<h3>❌ No Available Courts</h3>"
-            html += f"<p>All courts are currently booked. Checked {len(summary['booked_slots'])} slots.</p>"
         
         html += f"""
             <h3>📊 Summary</h3>
             <ul>
-                <li>Available: {len(summary['available_slots'])}</li>
-                <li>Booked: {len(summary['booked_slots'])}</li>
-                <li>Sessions: {len(summary['session_slots'])}</li>
-                <li>Closed Days: {len(summary['closed_days'])}</li>
+                <li>New Evening Slots: {len(new_slots)}</li>
+                <li>Total Evening Slots: {len(all_evening_slots)}</li>
             </ul>
             
             <hr>
@@ -151,24 +178,37 @@ class GitHubCourtMonitor:
                         self.logger.warning(f"Unexpected time format: {slot_time}")
                         continue
             
-            # Only send notification if courts are available after 5pm
-            if evening_slots:
-                subject = f"🎾 {len(evening_slots)} Tennis Courts Available After 5pm at St Johns Park!"
-                # Update summary to only include evening slots for email
-                evening_summary = summary.copy()
-                evening_summary['available_slots'] = evening_slots
-                body = self.format_availability_email(evening_summary)
+            # Check for new evening slots
+            previously_notified = self.load_notified_slots()
+            current_slot_ids = set(f"{slot['date']}_{slot['time']}_{slot['court']}" for slot in evening_slots)
+            new_slot_ids = current_slot_ids - previously_notified
+            
+            # Get new slots objects
+            new_evening_slots = [slot for slot in evening_slots 
+                               if f"{slot['date']}_{slot['time']}_{slot['court']}" in new_slot_ids]
+            
+            # Only send notification if there are new courts available after 5pm
+            if new_evening_slots:
+                subject = f"🎾 {len(new_evening_slots)} New Tennis Courts Available After 5pm at St Johns Park!"
+                body = self.format_availability_email(new_evening_slots, evening_slots)
                 self.send_notification(subject, body)
                 
+                # Save current evening slots as notified
+                self.save_notified_slots(evening_slots)
+                
                 # Also log available evening slots
-                self.logger.info("AVAILABLE EVENING COURTS FOUND (after 5pm):")
-                for slot in evening_slots:
-                    self.logger.info(f"  {slot['date']} at {slot['time']} - {slot['court']}")
+                self.logger.info(f"NEW EVENING COURTS FOUND (after 5pm): {len(new_evening_slots)} new, {len(evening_slots)} total")
+                for slot in new_evening_slots:
+                    self.logger.info(f"  NEW: {slot['date']} at {slot['time']} - {slot['court']}")
             else:
-                if summary['available_slots']:
+                if evening_slots:
+                    self.logger.info(f"Evening courts available but no new ones ({len(evening_slots)} total slots)")
+                elif summary['available_slots']:
                     self.logger.info(f"Courts available but none after 5pm ({len(summary['available_slots'])} total slots)")
                 else:
                     self.logger.info("No available courts found")
+                    # Clear notified slots if no courts are available
+                    self.save_notified_slots([])
                 # Optionally send daily summary (uncomment if you want daily updates)
                 # if datetime.now().hour == 20:  # 8 PM UTC (9 PM UK time)
                 #     subject = "📊 Daily Tennis Court Summary - St Johns Park"
