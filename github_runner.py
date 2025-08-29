@@ -187,14 +187,14 @@ class GitHubCourtMonitor:
             new_evening_slots = [slot for slot in evening_slots 
                                if f"{slot['date']}_{slot['time']}_{slot['court']}" in new_slot_ids]
             
+            # Update notified slots to current state (always save the current slots)
+            self.save_notified_slots(evening_slots)
+            
             # Only send notification if there are new courts available after 5pm
             if new_evening_slots:
                 subject = f"🎾 {len(new_evening_slots)} New Tennis Courts Available After 5pm at St Johns Park!"
                 body = self.format_availability_email(new_evening_slots, evening_slots)
                 self.send_notification(subject, body)
-                
-                # Save current evening slots as notified
-                self.save_notified_slots(evening_slots)
                 
                 # Also log available evening slots
                 self.logger.info(f"NEW EVENING COURTS FOUND (after 5pm): {len(new_evening_slots)} new, {len(evening_slots)} total")
@@ -207,8 +207,6 @@ class GitHubCourtMonitor:
                     self.logger.info(f"Courts available but none after 5pm ({len(summary['available_slots'])} total slots)")
                 else:
                     self.logger.info("No available courts found")
-                    # Clear notified slots if no courts are available
-                    self.save_notified_slots([])
                 # Optionally send daily summary (uncomment if you want daily updates)
                 # if datetime.now().hour == 20:  # 8 PM UTC (9 PM UK time)
                 #     subject = "📊 Daily Tennis Court Summary - St Johns Park"

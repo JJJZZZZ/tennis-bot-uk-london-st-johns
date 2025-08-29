@@ -18,7 +18,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: notified_slots.json
-        key: tennis-notifications-${{ hashFiles('**/github_runner.py') }}
+        key: tennis-notifications-${{ github.run_id }}
         restore-keys: |
           tennis-notifications-
       
@@ -40,13 +40,6 @@ jobs:
         EMAIL_USER: ${{ secrets.EMAIL_USER }}
         EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
         NOTIFICATION_EMAIL: ${{ secrets.NOTIFICATION_EMAIL }}
-        
-    - name: Save notification state cache
-      if: always()
-      uses: actions/cache/save@v4
-      with:
-        path: notified_slots.json
-        key: tennis-notifications-${{ hashFiles('**/github_runner.py') }}-${{ github.run_number }}
         
     - name: Upload logs
       if: always()
