@@ -268,7 +268,7 @@ class StJohnsParkChecker:
             Formatted string report
         """
         report = []
-        report.append("🎾 ST JOHNS PARK TENNIS COURT SUMMARY")
+        report.append("ST JOHNS PARK TENNIS COURT SUMMARY")
         report.append("=" * 45)
         
         # Overall stats
@@ -277,16 +277,16 @@ class StJohnsParkChecker:
         total_sessions = len(summary['session_slots'])
         total_closed = len(summary['closed_days'])
         
-        report.append(f"📊 OVERVIEW:")
-        report.append(f"   Available: {total_available}")
-        report.append(f"   Booked: {total_booked}")
-        report.append(f"   Sessions: {total_sessions}")
-        report.append(f"   Closed Days: {total_closed}")
+        report.append(f"OVERVIEW:")
+        report.append(f"   Available Slots: {total_available} (open for booking)")
+        report.append(f"   Booked Slots: {total_booked} (already reserved)")
+        report.append(f"   Session Slots: {total_sessions} (group lessons/coaching)")
+        report.append(f"   Closed Days: {total_closed} (courts unavailable)")
         report.append("")
         
         # Available slots by date
         if summary['available_slots']:
-            report.append("✅ AVAILABLE COURTS:")
+            report.append("AVAILABLE COURTS:")
             
             # Group by date
             by_date = {}
@@ -335,7 +335,7 @@ class StJohnsParkChecker:
                 report.append(f"   {closed['date']}: {closed['message']}")
             report.append("")
         
-        report.append(f"🕐 Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}")
+        report.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}")
         
         return "\n".join(report)
     
