@@ -83,51 +83,137 @@ class GitHubCourtMonitor:
         except Exception as e:
             self.logger.error(f"Could not save notified slots: {e}")
     
-    def format_availability_email(self, new_slots, all_evening_slots):
-        """Format court availability as HTML email with new and all available slots"""
+    def format_availability_email(self, new_slots, all_evening_slots, all_slots=None):
+        """Format court availability as a clean, easy-to-scan HTML email.
+        all_slots: all available slots across the day (before and after 5pm)
+        """
+        # Precompute ids for marking new rows
+        new_ids = set(f"{s['date']}_{s['time']}_{s['court']}" for s in (new_slots or []))
+
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')
+
         html = f"""
         <html>
-        <head></head>
-        <body>
-            <h2>🎾 St Johns Park Tennis Court Update</h2>
-            <p><strong>Check Time:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}</p>
+        <head>
+            <meta charset=\"UTF-8\" />
+        </head>
+        <body style=\"margin:0;padding:24px;background-color:#f5f7fb;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;\">
+          <div style=\"max-width:640px;margin:0 auto;background:#ffffff;border:1px solid #e6e8eb;border-radius:8px;box-shadow:0 2px 6px rgba(16,24,40,.08);overflow:hidden;\">
+            <div style=\"background:#0d6efd;color:#ffffff;padding:16px 20px;\">
+              <h2 style=\"margin:0;font-size:20px;\">St Johns Park Tennis Court Availability</h2>
+              <div style=\"margin-top:4px;font-size:12px;opacity:.95;\">Checked at: {timestamp}</div>
+            </div>
+            <div style=\"padding:20px;\">
+              <div style=\"background:#f8fafc;border:1px solid #eef2f7;border-radius:6px;padding:12px 14px;margin:0 0 16px 0;\">
+                <div style=\"font-size:14px;color:#101828;\"><strong>Summary</strong></div>
+                <div style=\"margin-top:6px;color:#344054;font-size:14px;\">New evening slots (after 5pm): <strong>{len(new_slots)}</strong></div>
+                <div style=\"margin-top:2px;color:#344054;font-size:14px;\">Total evening slots (after 5pm): <strong>{len(all_evening_slots)}</strong></div>
+              </div>
         """
-        
+
         if new_slots:
-            html += f"""
-            <h3>🆕 New Courts Available After 5pm!</h3>
-            <ul>
+            html += """
+              <h3 style=\"margin:20px 0 8px 0;font-size:16px;color:#101828;\">New Evening Slots (after 5pm)</h3>
+              <table style=\"border-collapse:collapse;width:100%;border:1px solid #e6e8eb;border-radius:6px;overflow:hidden;\">
+                <thead>
+                  <tr style=\"background:#f1f4f8;\">
+                    <th style=\"border-bottom:1px solid #e6e8eb;padding:10px;text-align:left;font-size:13px;color:#475467;\">Date</th>
+                    <th style=\"border-bottom:1px solid #e6e8eb;padding:10px;text-align:left;font-size:13px;color:#475467;\">Time</th>
+                    <th style=\"border-bottom:1px solid #e6e8eb;padding:10px;text-align:left;font-size:13px;color:#475467;\">Court</th>
+                  </tr>
+                </thead>
+                <tbody>
             """
-            for slot in new_slots:
-                html += f"<li><strong>{slot['date']}</strong> at <strong>{slot['time']}</strong> - {slot['court']}</li>"
-            html += "</ul>"
-        
+            row_index = 0
+            for s in new_slots:
+                zebra = "#ffffff" if row_index % 2 == 0 else "#fbfdff"
+                html += (
+                    f"<tr style='background:{zebra};'>"
+                    f"<td style='border-top:1px solid #eef2f7;padding:10px;font-size:14px;color:#101828;'>{s['date']}</td>"
+                    f"<td style='border-top:1px solid #eef2f7;padding:10px;font-size:14px;color:#101828;'>{s['time']}</td>"
+                    f"<td style='border-top:1px solid #eef2f7;padding:10px;font-size:14px;color:#101828;'>{s['court']}</td>"
+                    f"</tr>"
+                )
+                row_index += 1
+            html += """
+                </tbody>
+              </table>
+            """
+
         if all_evening_slots:
-            html += f"""
-            <h3>🌅 All Available Courts After 5pm:</h3>
-            <ul>
+            html += """
+              <h3 style=\"margin:20px 0 8px 0;font-size:16px;color:#101828;\">All Evening Slots (after 5pm)</h3>
+              <table style=\"border-collapse:collapse;width:100%;border:1px solid #e6e8eb;border-radius:6px;overflow:hidden;\">
+                <thead>
+                  <tr style=\"background:#f1f4f8;\">
+                    <th style=\"border-bottom:1px solid #e6e8eb;padding:10px;text-align:left;font-size:13px;color:#475467;\">Date</th>
+                    <th style=\"border-bottom:1px solid #e6e8eb;padding:10px;text-align:left;font-size:13px;color:#475467;\">Time</th>
+                    <th style=\"border-bottom:1px solid #e6e8eb;padding:10px;text-align:left;font-size:13px;color:#475467;\">Court</th>
+                    <th style=\"border-bottom:1px solid #e6e8eb;padding:10px;text-align:left;font-size:13px;color:#475467;\">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
             """
-            for slot in all_evening_slots:
-                is_new = slot in new_slots
-                new_badge = " <span style='background-color: #ff4444; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;'>NEW</span>" if is_new else ""
-                html += f"<li><strong>{slot['date']}</strong> at <strong>{slot['time']}</strong> - {slot['court']}{new_badge}</li>"
-            html += "</ul>"
-            
-            html += f"""
-            <p><a href="https://tennistowerhamlets.com/book/courts/st-johns-park" 
-               style="background-color: #4CAF50; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">
-               🔗 Book Now</a></p>
+            row_index = 0
+            for s in all_evening_slots:
+                sid = f"{s['date']}_{s['time']}_{s['court']}"
+                status = "New" if sid in new_ids else "Existing"
+                zebra = "#ffffff" if row_index % 2 == 0 else "#fbfdff"
+                badge_bg = "#16a34a" if status == "New" else "#64748b"
+                html += (
+                    f"<tr style='background:{zebra};'>"
+                    f"<td style='border-top:1px solid #eef2f7;padding:10px;font-size:14px;color:#101828;'>{s['date']}</td>"
+                    f"<td style='border-top:1px solid #eef2f7;padding:10px;font-size:14px;color:#101828;'>{s['time']}</td>"
+                    f"<td style='border-top:1px solid #eef2f7;padding:10px;font-size:14px;color:#101828;'>{s['court']}</td>"
+                    f"<td style='border-top:1px solid #eef2f7;padding:10px;font-size:13px;'><span style='display:inline-block;padding:2px 8px;border-radius:999px;background:{badge_bg};color:#ffffff;'>{status}</span></td>"
+                    f"</tr>"
+                )
+                row_index += 1
+            html += """
+                </tbody>
+              </table>
+
+              <p style=\"margin: 18px 0;\">
+                <a href=\"https://tennistowerhamlets.com/book/courts/st-johns-park\" 
+                   style=\"display:inline-block;background-color:#0d6efd;color:#ffffff;padding:10px 16px;text-decoration:none;border-radius:6px;font-weight:600;\">Book Now</a>
+              </p>
             """
-        
-        html += f"""
-            <h3>📊 Summary</h3>
-            <ul>
-                <li>New Evening Slots: {len(new_slots)}</li>
-                <li>Total Evening Slots: {len(all_evening_slots)}</li>
-            </ul>
-            
-            <hr>
-            <p><small>Automated check via GitHub Actions</small></p>
+
+        if all_slots:
+            html += """
+              <h3 style=\"margin:20px 0 8px 0;font-size:16px;color:#101828;\">All Available Slots (all day)</h3>
+              <table style=\"border-collapse:collapse;width:100%;border:1px solid #e6e8eb;border-radius:6px;overflow:hidden;\">
+                <thead>
+                  <tr style=\"background:#f1f4f8;\">
+                    <th style=\"border-bottom:1px solid #e6e8eb;padding:10px;text-align:left;font-size:13px;color:#475467;\">Date</th>
+                    <th style=\"border-bottom:1px solid #e6e8eb;padding:10px;text-align:left;font-size:13px;color:#475467;\">Time</th>
+                    <th style=\"border-bottom:1px solid #e6e8eb;padding:10px;text-align:left;font-size:13px;color:#475467;\">Court</th>
+                  </tr>
+                </thead>
+                <tbody>
+            """
+            row_index = 0
+            for s in all_slots:
+                zebra = "#ffffff" if row_index % 2 == 0 else "#fbfdff"
+                html += (
+                    f"<tr style='background:{zebra};'>"
+                    f"<td style='border-top:1px solid #eef2f7;padding:10px;font-size:14px;color:#101828;'>{s['date']}</td>"
+                    f"<td style='border-top:1px solid #eef2f7;padding:10px;font-size:14px;color:#101828;'>{s['time']}</td>"
+                    f"<td style='border-top:1px solid #eef2f7;padding:10px;font-size:14px;color:#101828;'>{s['court']}</td>"
+                    f"</tr>"
+                )
+                row_index += 1
+            html += """
+                </tbody>
+              </table>
+            """
+
+        html += """
+            </div>
+            <div style=\"padding:12px 20px;border-top:1px solid #e6e8eb;background:#fafbfc;color:#667085;font-size:12px;\">
+              Automated check via GitHub Actions
+            </div>
+          </div>
         </body>
         </html>
         """
@@ -210,7 +296,7 @@ class GitHubCourtMonitor:
             # Only send notification if there are new courts available after 5pm
             if new_evening_slots:
                 subject = f"{len(new_evening_slots)} New Tennis Courts Available After 5pm at St Johns Park!"
-                body = self.format_availability_email(new_evening_slots, evening_slots)
+                body = self.format_availability_email(new_evening_slots, evening_slots, summary.get('available_slots'))
                 self.send_notification(subject, body)
                 self.logger.info(f"Email notification sent for {len(new_evening_slots)} new evening courts")
             else:
@@ -222,7 +308,7 @@ class GitHubCourtMonitor:
                     self.logger.info("No email sent - no available courts found")
                 # Optionally send daily summary (uncomment if you want daily updates)
                 # if datetime.now().hour == 20:  # 8 PM UTC (9 PM UK time)
-                #     subject = "📊 Daily Tennis Court Summary - St Johns Park"
+                #     subject = "Daily Tennis Court Summary - St Johns Park"
                 #     body = self.format_availability_email(summary)
                 #     self.send_notification(subject, body)
             
@@ -232,7 +318,7 @@ class GitHubCourtMonitor:
             self.logger.error(f"Error during court check: {e}")
             # Send error notification
             if self.email_user and self.notification_email:
-                error_subject = "⚠️ Tennis Court Monitor Error"
+                error_subject = "Tennis Court Monitor Error"
                 error_body = f"""
                 <html><body>
                 <h2>Tennis Court Monitor Error</h2>
