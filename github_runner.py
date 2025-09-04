@@ -90,6 +90,36 @@ class GitHubCourtMonitor:
         # Precompute ids for marking new rows
         new_ids = set(f"{s['date']}_{s['time']}_{s['court']}" for s in (new_slots or []))
 
+        # Helper to get weekday name for a YYYY-MM-DD date string
+        def weekday_name(date_str: str) -> str:
+            try:
+                return datetime.strptime(date_str, '%Y-%m-%d').strftime('%A')
+            except Exception:
+                return ''
+
+        # Helper to create a numeric sort key (minutes since midnight) from various time formats
+        def time_sort_key(t: str) -> int:
+            try:
+                tl = t.strip().lower()
+                is_am = 'am' in tl
+                is_pm = 'pm' in tl
+                tl = tl.replace('am', '').replace('pm', '').strip()
+                hour = 0
+                minute = 0
+                if ':' in tl:
+                    parts = tl.split(':')
+                    hour = int(parts[0])
+                    minute = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+                else:
+                    hour = int(''.join(ch for ch in tl if ch.isdigit())) if any(ch.isdigit() for ch in tl) else 0
+                if is_pm and hour != 12:
+                    hour += 12
+                if is_am and hour == 12:
+                    hour = 0
+                return hour * 60 + minute
+            except Exception:
+                return 0
+
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')
 
         html = f"""
@@ -104,75 +134,90 @@ class GitHubCourtMonitor:
               <div style=\"margin-top:4px;font-size:12px;opacity:.95;\">Checked at: {timestamp}</div>
             </div>
             <div style=\"padding:20px;\">
-              <div style=\"background:#f8fafc;border:1px solid #eef2f7;border-radius:6px;padding:12px 14px;margin:0 0 16px 0;\">
-                <div style=\"font-size:14px;color:#101828;\"><strong>Summary</strong></div>
-                <div style=\"margin-top:6px;color:#344054;font-size:14px;\">New evening slots (after 5pm): <strong>{len(new_slots)}</strong></div>
-                <div style=\"margin-top:2px;color:#344054;font-size:14px;\">Total evening slots (after 5pm): <strong>{len(all_evening_slots)}</strong></div>
-              </div>
         """
 
         if new_slots:
             html += """
               <h3 style=\"margin:20px 0 8px 0;font-size:16px;color:#101828;\">New Evening Slots (after 5pm)</h3>
-              <table style=\"border-collapse:collapse;width:100%;border:1px solid #e6e8eb;border-radius:6px;overflow:hidden;\">
-                <thead>
-                  <tr style=\"background:#f1f4f8;\">
-                    <th style=\"border-bottom:1px solid #e6e8eb;padding:10px;text-align:left;font-size:13px;color:#475467;\">Date</th>
-                    <th style=\"border-bottom:1px solid #e6e8eb;padding:10px;text-align:left;font-size:13px;color:#475467;\">Time</th>
-                    <th style=\"border-bottom:1px solid #e6e8eb;padding:10px;text-align:left;font-size:13px;color:#475467;\">Court</th>
-                  </tr>
-                </thead>
-                <tbody>
             """
-            row_index = 0
+            # Group new evening slots by date
+            ns_by_date = {}
             for s in new_slots:
-                zebra = "#ffffff" if row_index % 2 == 0 else "#fbfdff"
+                d = s.get('date')
+                if not d:
+                    continue
+                ns_by_date.setdefault(d, []).append(s)
+
+            for d in sorted(ns_by_date.keys()):
+                slots = sorted(ns_by_date[d], key=lambda x: time_sort_key(x.get('time', '0:00')))
+                count = len(slots)
+                dow = weekday_name(d)
                 html += (
-                    f"<tr style='background:{zebra};'>"
-                    f"<td style='border-top:1px solid #eef2f7;padding:10px;font-size:14px;color:#101828;'>{s['date']}</td>"
-                    f"<td style='border-top:1px solid #eef2f7;padding:10px;font-size:14px;color:#101828;'>{s['time']}</td>"
-                    f"<td style='border-top:1px solid #eef2f7;padding:10px;font-size:14px;color:#101828;'>{s['court']}</td>"
-                    f"</tr>"
+                    f"<div style='border:1px solid #e6e8eb;border-radius:8px;margin:10px 0;overflow:hidden;'>"
+                    f"<div style='background:#f8fafc;padding:10px 12px;border-bottom:1px solid #eef2f7;display:flex;align-items:center;justify-content:space-between;'>"
+                    f"<div style='font-size:14px;color:#101828;font-weight:600;'>{d} ({dow})</div>"
+                    f"<div style='font-size:12px;color:#475467;background:#e6f4ff;border:1px solid #cfe5ff;border-radius:999px;padding:2px 8px;'>"
+                    f"{count} slot{'s' if count != 1 else ''}</div>"
+                    f"</div>"
+                    f"<div style='padding:10px 12px;'>"
                 )
-                row_index += 1
-            html += """
-                </tbody>
-              </table>
-            """
+
+                for s in slots:
+                    court_label = s['court'].replace('_', ' ').title()
+                    html += (
+                        f"<span style='display:inline-block;margin:4px 6px 0 0;padding:6px 10px;border:1px solid #e6e8eb;border-radius:999px;background:#ffffff;font-size:13px;color:#101828;'>"
+                        f"{s['time']} • {court_label}"
+                        f"</span>"
+                    )
+
+                html += "</div></div>"
 
         if all_evening_slots:
             html += """
               <h3 style=\"margin:20px 0 8px 0;font-size:16px;color:#101828;\">All Evening Slots (after 5pm)</h3>
-              <table style=\"border-collapse:collapse;width:100%;border:1px solid #e6e8eb;border-radius:6px;overflow:hidden;\">
-                <thead>
-                  <tr style=\"background:#f1f4f8;\">
-                    <th style=\"border-bottom:1px solid #e6e8eb;padding:10px;text-align:left;font-size:13px;color:#475467;\">Date</th>
-                    <th style=\"border-bottom:1px solid #e6e8eb;padding:10px;text-align:left;font-size:13px;color:#475467;\">Time</th>
-                    <th style=\"border-bottom:1px solid #e6e8eb;padding:10px;text-align:left;font-size:13px;color:#475467;\">Court</th>
-                    <th style=\"border-bottom:1px solid #e6e8eb;padding:10px;text-align:left;font-size:13px;color:#475467;\">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
             """
-            row_index = 0
+            # Group all evening slots by date
+            es_by_date = {}
             for s in all_evening_slots:
-                sid = f"{s['date']}_{s['time']}_{s['court']}"
-                status = "New" if sid in new_ids else "Existing"
-                zebra = "#ffffff" if row_index % 2 == 0 else "#fbfdff"
-                badge_bg = "#16a34a" if status == "New" else "#64748b"
-                html += (
-                    f"<tr style='background:{zebra};'>"
-                    f"<td style='border-top:1px solid #eef2f7;padding:10px;font-size:14px;color:#101828;'>{s['date']}</td>"
-                    f"<td style='border-top:1px solid #eef2f7;padding:10px;font-size:14px;color:#101828;'>{s['time']}</td>"
-                    f"<td style='border-top:1px solid #eef2f7;padding:10px;font-size:14px;color:#101828;'>{s['court']}</td>"
-                    f"<td style='border-top:1px solid #eef2f7;padding:10px;font-size:13px;'><span style='display:inline-block;padding:2px 8px;border-radius:999px;background:{badge_bg};color:#ffffff;'>{status}</span></td>"
-                    f"</tr>"
-                )
-                row_index += 1
-            html += """
-                </tbody>
-              </table>
+                d = s.get('date')
+                if not d:
+                    continue
+                es_by_date.setdefault(d, []).append(s)
 
+            for d in sorted(es_by_date.keys()):
+                slots = sorted(es_by_date[d], key=lambda x: time_sort_key(x.get('time', '0:00')))
+                count = len(slots)
+                dow = weekday_name(d)
+                # Count new items for this day
+                new_count = sum(1 for s in slots if f"{s['date']}_{s['time']}_{s['court']}" in new_ids)
+                html += (
+                    f"<div style='border:1px solid #e6e8eb;border-radius:8px;margin:10px 0;overflow:hidden;'>"
+                    f"<div style='background:#f8fafc;padding:10px 12px;border-bottom:1px solid #eef2f7;display:flex;align-items:center;justify-content:space-between;'>"
+                    f"<div style='font-size:14px;color:#101828;font-weight:600;'>{d} ({dow})</div>"
+                    f"<div>"
+                    f"<span style='display:inline-block;margin-left:6px;font-size:12px;color:#475467;background:#e6f4ff;border:1px solid #cfe5ff;border-radius:999px;padding:2px 8px;'>{count} slot{'s' if count != 1 else ''}</span>"
+                    f"<span style='display:inline-block;margin-left:6px;font-size:12px;color:#155e2b;background:#dcfce7;border:1px solid #bbf7d0;border-radius:999px;padding:2px 8px;'>{new_count} new</span>"
+                    f"</div>"
+                    f"</div>"
+                    f"<div style='padding:10px 12px;'>"
+                )
+
+                for s in slots:
+                    sid = f"{s['date']}_{s['time']}_{s['court']}"
+                    is_new = sid in new_ids
+                    court_label = s['court'].replace('_', ' ').title()
+                    pill_bg = '#e8f7ee' if is_new else '#ffffff'
+                    pill_border = '#86efac' if is_new else '#e6e8eb'
+                    pill_color = '#065f46' if is_new else '#101828'
+                    html += (
+                        f"<span style='display:inline-block;margin:4px 6px 0 0;padding:6px 10px;border:1px solid {pill_border};border-radius:999px;background:{pill_bg};font-size:13px;color:{pill_color};'>"
+                        f"{s['time']} • {court_label}"
+                        f"</span>"
+                    )
+
+                html += "</div></div>"
+
+            html += """
               <p style=\"margin: 18px 0;\">
                 <a href=\"https://tennistowerhamlets.com/book/courts/st-johns-park\" 
                    style=\"display:inline-block;background-color:#0d6efd;color:#ffffff;padding:10px 16px;text-decoration:none;border-radius:6px;font-weight:600;\">Book Now</a>
@@ -181,32 +226,40 @@ class GitHubCourtMonitor:
 
         if all_slots:
             html += """
-              <h3 style=\"margin:20px 0 8px 0;font-size:16px;color:#101828;\">All Available Slots (all day)</h3>
-              <table style=\"border-collapse:collapse;width:100%;border:1px solid #e6e8eb;border-radius:6px;overflow:hidden;\">
-                <thead>
-                  <tr style=\"background:#f1f4f8;\">
-                    <th style=\"border-bottom:1px solid #e6e8eb;padding:10px;text-align:left;font-size:13px;color:#475467;\">Date</th>
-                    <th style=\"border-bottom:1px solid #e6e8eb;padding:10px;text-align:left;font-size:13px;color:#475467;\">Time</th>
-                    <th style=\"border-bottom:1px solid #e6e8eb;padding:10px;text-align:left;font-size:13px;color:#475467;\">Court</th>
-                  </tr>
-                </thead>
-                <tbody>
+              <h3 style=\"margin:20px 0 8px 0;font-size:16px;color:#101828;\">All Available Slots</h3>
             """
-            row_index = 0
+            # Group slots by date
+            by_date = {}
             for s in all_slots:
-                zebra = "#ffffff" if row_index % 2 == 0 else "#fbfdff"
+                d = s.get('date')
+                if not d:
+                    continue
+                by_date.setdefault(d, []).append(s)
+
+            for d in sorted(by_date.keys()):
+                slots = sorted(by_date[d], key=lambda x: time_sort_key(x.get('time', '0:00')))
+                count = len(slots)
+                dow = weekday_name(d)
                 html += (
-                    f"<tr style='background:{zebra};'>"
-                    f"<td style='border-top:1px solid #eef2f7;padding:10px;font-size:14px;color:#101828;'>{s['date']}</td>"
-                    f"<td style='border-top:1px solid #eef2f7;padding:10px;font-size:14px;color:#101828;'>{s['time']}</td>"
-                    f"<td style='border-top:1px solid #eef2f7;padding:10px;font-size:14px;color:#101828;'>{s['court']}</td>"
-                    f"</tr>"
+                    f"<div style='border:1px solid #e6e8eb;border-radius:8px;margin:10px 0;overflow:hidden;'>"
+                    f"<div style='background:#f8fafc;padding:10px 12px;border-bottom:1px solid #eef2f7;display:flex;align-items:center;justify-content:space-between;'>"
+                    f"<div style='font-size:14px;color:#101828;font-weight:600;'>{d} ({dow})</div>"
+                    f"<div style='font-size:12px;color:#475467;background:#e6f4ff;border:1px solid #cfe5ff;border-radius:999px;padding:2px 8px;'>"
+                    f"{count} slot{'s' if count != 1 else ''}</div>"
+                    f"</div>"
+                    f"<div style='padding:10px 12px;'>"
                 )
-                row_index += 1
-            html += """
-                </tbody>
-              </table>
-            """
+
+                # Render each slot as a pill for easy scanning
+                for s in slots:
+                    court_label = s['court'].replace('_', ' ').title()
+                    html += (
+                        f"<span style='display:inline-block;margin:4px 6px 0 0;padding:6px 10px;border:1px solid #e6e8eb;border-radius:999px;background:#ffffff;font-size:13px;color:#101828;'>"
+                        f"{s['time']} • {court_label}"
+                        f"</span>"
+                    )
+
+                html += "</div></div>"
 
         html += """
             </div>
