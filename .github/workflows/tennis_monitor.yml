@@ -3,8 +3,8 @@ name: Tennis Court Monitor
 on:
   workflow_dispatch: # Allow manual triggering
   schedule:
-    # Run every 30 minutes from 6 AM to 1 AM UK time (5 AM to 12 AM UTC)
-    - cron: '*/30 5-23 * * *'
+    # Run every 10 minutes from 6 AM to 1 AM UK time (5 AM to 12 AM UTC)
+    - cron: '*/10 5-23 * * *'
 
 jobs:
   check-courts:
