@@ -35,7 +35,52 @@ class GitHubCourtMonitor:
             ]
         )
         self.logger = logging.getLogger(__name__)
-        
+
+    def is_weekend(self, date_str: str) -> bool:
+        """Check if a date is Saturday or Sunday"""
+        try:
+            date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+            # weekday() returns 0=Monday, 6=Sunday
+            return date_obj.weekday() in [5, 6]  # 5=Saturday, 6=Sunday
+        except Exception:
+            return False
+
+    def get_time_range_for_date(self, date_str: str) -> tuple:
+        """
+        Get the time range filter for a given date.
+        Returns: (min_hour, max_hour, description)
+        """
+        if self.is_weekend(date_str):
+            return (9, 22, "Available (9am-10pm)")
+        else:
+            return (17, 24, "Evening (after 5pm)")
+
+    def parse_time_to_hour(self, time_str: str) -> int:
+        """
+        Extract hour from various time formats (e.g., '18:00', '8pm', '8am')
+        Returns hour in 24-hour format, or -1 if parsing fails
+        """
+        try:
+            time_lower = time_str.lower().strip()
+
+            if 'pm' in time_lower:
+                # Handle format like '8pm'
+                hour = int(time_lower.replace('pm', '').strip())
+                if hour != 12:  # Convert pm to 24-hour (except 12pm stays 12)
+                    hour += 12
+            elif 'am' in time_lower:
+                # Handle format like '8am'
+                hour = int(time_lower.replace('am', '').strip())
+                if hour == 12:  # Convert 12am to 0
+                    hour = 0
+            else:
+                # Handle format like '18:00'
+                hour = int(time_lower.split(':')[0])
+
+            return hour
+        except (ValueError, IndexError):
+            return -1
+
     def send_notification(self, subject: str, body: str):
         """Send email notification about court availability"""
         if not all([self.email_user, self.email_password, self.notification_email]):
@@ -83,12 +128,26 @@ class GitHubCourtMonitor:
         except Exception as e:
             self.logger.error(f"Could not save notified slots: {e}")
     
-    def format_availability_email(self, new_slots, all_evening_slots, all_slots=None):
+    def format_availability_email(self, new_slots, all_filtered_slots, all_slots=None):
         """Format court availability as a clean, easy-to-scan HTML email.
-        all_slots: all available slots across the day (before and after 5pm)
+        all_filtered_slots: filtered slots based on day type (weekday: after 5pm, weekend: 9am-10pm)
+        all_slots: all available slots across the day (before and after filtering)
         """
         # Precompute ids for marking new rows
         new_ids = set(f"{s['date']}_{s['time']}_{s['court']}" for s in (new_slots or []))
+
+        # Helper to determine section title based on day types in the slots
+        def get_section_title(slots, prefix="Available"):
+            if not slots:
+                return f"{prefix} Slots"
+            has_weekday = any(not self.is_weekend(s['date']) for s in slots)
+            has_weekend = any(self.is_weekend(s['date']) for s in slots)
+            if has_weekday and has_weekend:
+                return f"{prefix} Slots"
+            elif has_weekend:
+                return f"{prefix} Slots (Weekend 9am-10pm)"
+            else:
+                return f"{prefix} Slots (Weekday After 5pm)"
 
         # Helper to get weekday name for a YYYY-MM-DD date string
         def weekday_name(date_str: str) -> str:
@@ -137,8 +196,9 @@ class GitHubCourtMonitor:
         """
 
         if new_slots:
-            html += """
-              <h3 style=\"margin:20px 0 8px 0;font-size:16px;color:#101828;\">New Evening Slots (after 5pm)</h3>
+            new_section_title = get_section_title(new_slots, "New")
+            html += f"""
+              <h3 style=\"margin:20px 0 8px 0;font-size:16px;color:#101828;\">{new_section_title}</h3>
             """
             # Group new evening slots by date
             ns_by_date = {}
@@ -172,13 +232,14 @@ class GitHubCourtMonitor:
 
                 html += "</div></div>"
 
-        if all_evening_slots:
-            html += """
-              <h3 style=\"margin:20px 0 8px 0;font-size:16px;color:#101828;\">All Evening Slots (after 5pm)</h3>
+        if all_filtered_slots:
+            all_section_title = get_section_title(all_filtered_slots, "All")
+            html += f"""
+              <h3 style=\"margin:20px 0 8px 0;font-size:16px;color:#101828;\">{all_section_title}</h3>
             """
-            # Group all evening slots by date
+            # Group all filtered slots by date
             es_by_date = {}
-            for s in all_evening_slots:
+            for s in all_filtered_slots:
                 d = s.get('date')
                 if not d:
                     continue
@@ -289,74 +350,94 @@ class GitHubCourtMonitor:
             summary_report = self.checker.format_summary_report(summary)
             self.logger.info(f"Court check completed:\n{summary_report}")
             
-            # Filter available slots to only include times after 5pm (17:00) for initial logging
-            temp_evening_slots = []
+            # Filter available slots based on day type (weekday: after 5pm, weekend: 9am-10pm)
+            temp_filtered_slots = []
             if summary['available_slots']:
                 for slot in summary['available_slots']:
+                    slot_date = slot['date']
                     slot_time = slot['time']
-                    # Extract hour from time format (e.g., '18:00' or '8pm')
-                    try:
-                        if 'pm' in slot_time.lower():
-                            # Handle format like '8pm'
-                            hour = int(slot_time.lower().replace('pm', '').strip())
-                            if hour != 12:  # Convert pm to 24-hour (except 12pm stays 12)
-                                hour += 12
-                        elif 'am' in slot_time.lower():
-                            # Handle format like '8am'
-                            hour = int(slot_time.lower().replace('am', '').strip())
-                            if hour == 12:  # Convert 12am to 0
-                                hour = 0
-                        else:
-                            # Handle format like '18:00'
-                            hour = int(slot_time.split(':')[0])
-                        
-                        if hour >= 17:  # 5pm or later
-                            temp_evening_slots.append(slot)
-                    except (ValueError, IndexError):
-                        continue
+
+                    # Get time range for this specific date (weekday vs weekend)
+                    min_hour, max_hour, _ = self.get_time_range_for_date(slot_date)
+
+                    # Parse the hour from the slot time
+                    hour = self.parse_time_to_hour(slot_time)
+
+                    # Check if hour is within the valid range for this day type
+                    if hour != -1 and min_hour <= hour < max_hour:
+                        temp_filtered_slots.append(slot)
             
-            # Log evening slots summary immediately after main summary
-            if temp_evening_slots:
-                self.logger.info(f"\nEVENING COURTS AVAILABLE (After 5pm): {len(temp_evening_slots)} slots")
-                for slot in temp_evening_slots:
-                    self.logger.info(f"   {slot['date']}: {slot['time']} ({slot['court']})")
+            # Log filtered slots summary immediately after main summary
+            if temp_filtered_slots:
+                # Group by day type for clearer logging
+                weekday_slots = [s for s in temp_filtered_slots if not self.is_weekend(s['date'])]
+                weekend_slots = [s for s in temp_filtered_slots if self.is_weekend(s['date'])]
+
+                if weekday_slots:
+                    self.logger.info(f"\nWEEKDAY COURTS AVAILABLE (After 5pm): {len(weekday_slots)} slots")
+                    for slot in weekday_slots:
+                        self.logger.info(f"   {slot['date']}: {slot['time']} ({slot['court']})")
+
+                if weekend_slots:
+                    self.logger.info(f"\nWEEKEND COURTS AVAILABLE (9am-10pm): {len(weekend_slots)} slots")
+                    for slot in weekend_slots:
+                        self.logger.info(f"   {slot['date']}: {slot['time']} ({slot['court']})")
             else:
-                self.logger.info(f"\nEVENING COURTS: None available after 5pm")
+                self.logger.info(f"\nFILTERED COURTS: None available in target time ranges")
+
+            # Use the already filtered slots
+            filtered_slots = temp_filtered_slots
             
-            # Use the already filtered evening slots
-            evening_slots = temp_evening_slots
-            
-            # Check for new evening slots
+            # Check for new slots (weekday evening or weekend daytime)
             previously_notified = self.load_notified_slots()
-            current_slot_ids = set(f"{slot['date']}_{slot['time']}_{slot['court']}" for slot in evening_slots)
+            current_slot_ids = set(f"{slot['date']}_{slot['time']}_{slot['court']}" for slot in filtered_slots)
             new_slot_ids = current_slot_ids - previously_notified
-            
+
             # Get new slots objects
-            new_evening_slots = [slot for slot in evening_slots 
+            new_filtered_slots = [slot for slot in filtered_slots
                                if f"{slot['date']}_{slot['time']}_{slot['court']}" in new_slot_ids]
-            
-            # Always log new evening courts section
-            if new_evening_slots:
-                self.logger.info(f"\nNEW EVENING COURTS (After 5pm): {len(new_evening_slots)} new slots found!")
-                for slot in new_evening_slots:
-                    self.logger.info(f"   NEW: {slot['date']}: {slot['time']} ({slot['court']})")
+
+            # Always log new courts section
+            if new_filtered_slots:
+                weekday_new = [s for s in new_filtered_slots if not self.is_weekend(s['date'])]
+                weekend_new = [s for s in new_filtered_slots if self.is_weekend(s['date'])]
+
+                self.logger.info(f"\nNEW COURTS FOUND: {len(new_filtered_slots)} new slots!")
+                if weekday_new:
+                    self.logger.info(f"  Weekday (after 5pm): {len(weekday_new)} slots")
+                    for slot in weekday_new:
+                        self.logger.info(f"     NEW: {slot['date']}: {slot['time']} ({slot['court']})")
+                if weekend_new:
+                    self.logger.info(f"  Weekend (9am-10pm): {len(weekend_new)} slots")
+                    for slot in weekend_new:
+                        self.logger.info(f"     NEW: {slot['date']}: {slot['time']} ({slot['court']})")
             else:
-                self.logger.info(f"\nNEW EVENING COURTS (After 5pm): No new slots since last check")
-            
+                self.logger.info(f"\nNEW COURTS: No new slots since last check")
+
             # Update notified slots to current state (always save the current slots)
-            self.save_notified_slots(evening_slots)
+            self.save_notified_slots(filtered_slots)
             
-            # Only send notification if there are new courts available after 5pm
-            if new_evening_slots:
-                subject = f"{len(new_evening_slots)} New Tennis Courts Available After 5pm at St Johns Park!"
-                body = self.format_availability_email(new_evening_slots, evening_slots, summary.get('available_slots'))
+            # Only send notification if there are new courts available
+            if new_filtered_slots:
+                # Generate dynamic subject based on day types
+                weekday_count = len([s for s in new_filtered_slots if not self.is_weekend(s['date'])])
+                weekend_count = len([s for s in new_filtered_slots if self.is_weekend(s['date'])])
+
+                if weekday_count > 0 and weekend_count > 0:
+                    subject = f"{len(new_filtered_slots)} New Tennis Courts Available at St Johns Park!"
+                elif weekend_count > 0:
+                    subject = f"{len(new_filtered_slots)} New Tennis Courts Available (Weekend 9am-10pm) at St Johns Park!"
+                else:
+                    subject = f"{len(new_filtered_slots)} New Tennis Courts Available (After 5pm) at St Johns Park!"
+
+                body = self.format_availability_email(new_filtered_slots, filtered_slots, summary.get('available_slots'))
                 self.send_notification(subject, body)
-                self.logger.info(f"Email notification sent for {len(new_evening_slots)} new evening courts")
+                self.logger.info(f"Email notification sent for {len(new_filtered_slots)} new courts")
             else:
-                if evening_slots:
-                    self.logger.info(f"No email sent - evening courts available but no new ones ({len(evening_slots)} total slots)")
+                if filtered_slots:
+                    self.logger.info(f"No email sent - courts available but no new ones ({len(filtered_slots)} total slots)")
                 elif summary['available_slots']:
-                    self.logger.info(f"No email sent - courts available but none after 5pm ({len(summary['available_slots'])} total slots)")
+                    self.logger.info(f"No email sent - courts available but none in target time ranges ({len(summary['available_slots'])} total slots)")
                 else:
                     self.logger.info("No email sent - no available courts found")
                 # Optionally send daily summary (uncomment if you want daily updates)
