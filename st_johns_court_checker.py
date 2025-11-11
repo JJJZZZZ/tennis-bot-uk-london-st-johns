@@ -32,16 +32,39 @@ class StJohnsParkChecker:
         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
         self.logger = logging.getLogger(__name__)
         
-    def initialize_session(self) -> bool:
-        """Initialize session by visiting the main page to get cookies"""
-        try:
-            response = self.session.get(self.booking_url)
-            response.raise_for_status()
-            self.logger.info("Session initialized successfully")
-            return True
-        except requests.RequestException as e:
-            self.logger.error(f"Failed to initialize session: {e}")
-            return False
+    def initialize_session(self, max_retries: int = 3, initial_delay: float = 2.0) -> bool:
+        """Initialize session by visiting the main page to get cookies
+
+        Args:
+            max_retries: Maximum number of retry attempts (default: 3)
+            initial_delay: Initial delay in seconds before first retry (default: 2.0)
+
+        Returns:
+            True if session initialized successfully, False otherwise
+        """
+        for attempt in range(max_retries):
+            try:
+                # Add timeout to prevent hanging (30 seconds is reasonable for website loads)
+                response = self.session.get(self.booking_url, timeout=30)
+                response.raise_for_status()
+                self.logger.info("Session initialized successfully")
+                return True
+            except requests.RequestException as e:
+                if attempt < max_retries - 1:
+                    # Calculate exponential backoff delay: 2s, 4s, 8s
+                    delay = initial_delay * (2 ** attempt)
+                    self.logger.warning(
+                        f"Failed to initialize session (attempt {attempt + 1}/{max_retries}): {e}. "
+                        f"Retrying in {delay:.1f} seconds..."
+                    )
+                    time.sleep(delay)
+                else:
+                    # Final attempt failed
+                    self.logger.error(
+                        f"Failed to initialize session after {max_retries} attempts: {e}"
+                    )
+                    return False
+        return False
     
     def get_available_dates(self) -> List[str]:
         """Get list of available booking dates (7 days ahead)"""
@@ -81,8 +104,8 @@ class StJohnsParkChecker:
             else:
                 url = f"{self.booking_url}#book"
             
-            # Make request to booking page
-            response = self.session.get(url)
+            # Make request to booking page with timeout
+            response = self.session.get(url, timeout=30)
             response.raise_for_status()
             self.logger.debug(f"Requesting URL: {url}")
             
