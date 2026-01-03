@@ -59,3 +59,5 @@ Notes:
 ---
 
 **Simple, effective, free tennis court monitoring! 🎾**
+
+<!-- Last activity: 2026-01-03 - Keep workflow active -->
